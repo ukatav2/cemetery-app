@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Карта захоронений (Яндекс)</title>
+    <!-- ВАЖНО: вставьте свой API-ключ вместо YOUR_API_KEY_HERE -->
+    <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=YOUR_API_KEY_HERE" type="text/javascript"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f3f4f6;
+            color: #1f2937;
+        }
+        h1 {
+            font-size: 1.2rem;
+            text-align: center;
+            padding: 12px 15px;
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        #map {
+            width: 100%;
+            height: calc(100vh - 180px);
+        }
+        .controls {
+            padding: 10px 12px;
+            background: #ffffff;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .filter-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            flex: 1 1 200px;
+        }
+        input[type="text"], select {
+            padding: 8px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+        .btn-reset { background: #9ca3af; }
+        .btn-military { background: #dc2626; }
+        .stats {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .legend {
+            position: absolute;
+            bottom: 16px;
+            right: 16px;
+            background: #ffffff;
+            padding: 8px 10px;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 220px;
+        }
+        .legend-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        .legend-toggle {
+            font-size: 11px;
+            color: #2563eb;
+            background: #e5edff;
+            padding: 2px 8px;
+            border-radius: 999px;
+        }
+        .legend-content { margin-top: 6px; }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .legend-marker {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+        }
+        .legend-marker.default { background: #2563eb; }
+        .legend-marker.military { background: #dc2626; }
+        .legend-collapsed .legend-content { display: none; }
+    </style>
+</head>
+<body>
+    <h1>🗺️ Карта захоронений (Яндекс)</h1>
+    <div id="map"></div>
+
+    <div class="controls">
+        <div class="filter-group">
+            <input type="text" id="search-filter" placeholder="Поиск по ФИО..." />
+            <select id="cemetery-filter">
+                <option value="">Все кладбища</option>
+                <option value="Нагорное">Нагорное</option>
+                <option value="Шубино">Шубино</option>
+                <option value="Красная горка">Красная горка</option>
+                <option value="п. ж/д ст. Минка">п. ж/д ст. Минка</option>
+                <option value="п. Вязовая">п. Вязовая</option>
+                <option value="с. Тюбеляс">с. Тюбеляс</option>
+                <option value="с. Минка">с. Минка</option>
+                <option value="д. Вергаза">д. Вергаза</option>
+                <option value="д. Верхняя Лука">д. Верхняя Лука</option>
+            </select>
+        </div>
+        <button class="btn-military" id="btn-military">⚔️ Только воинские</button>
+        <button class="btn-reset" id="btn-reset">Сброс</button>
+        <div class="stats">
+            📍 Всего: <b id="total-count">0</b> | ⚔️ Воинских: <b id="military-count">0</b>
+        </div>
+    </div>
+
+    <div class="legend legend-collapsed" id="legend-box">
+        <div class="legend-header" onclick="toggleLegend()">
+            <span>Легенда</span>
+            <span class="legend-toggle" id="legend-toggle-text">⯈ Открыть</span>
+        </div>
+        <div class="legend-content">
+            <div class="legend-item">
+                <div class="legend-marker default"></div>
+                <span>Обычное захоронение</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-marker military"></div>
+                <span>Воинское захоронение</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DB_NAME = 'CemeteryDB';
+        const STORE_NAME = 'graves';
+        let db = null;
+        let myMap = null;
+        let markersCollection = null;
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME);
+                request.onsuccess = e => {
+                    db = e.target.result;
+                    resolve(db);
+                };
+                request.onerror = e => reject(e);
+            });
+        }
+
+        function initMap() {
+            // Центр — г. Усть-Катав
+            myMap = new ymaps.Map('map', {
+                center: [54.9368, 58.1649],
+                zoom: 13,
+                controls: ['zoomControl', 'searchControl']
+            });
+
+            markersCollection = new ymaps.GeoObjectCollection();
+            myMap.geoObjects.add(markersCollection);
+
+            document.getElementById('search-filter').addEventListener('input', applyFilters);
+            document.getElementById('cemetery-filter').addEventListener('change', applyFilters);
+            document.getElementById('btn-military').addEventListener('click', showOnlyMilitary);
+            document.getElementById('btn-reset').addEventListener('click', resetFilters);
+
+            loadMarkers();
+            // периодически обновляем из БД, если записи меняются в Реестре
+            setInterval(loadMarkers, 7000);
+        }
+
+        function loadMarkers() {
+            if (!db) return;
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.getAll();
+
+            req.onsuccess = () => {
+                const records = req.result || [];
+                markersCollection.removeAll();
+
+                records.forEach(r => {
+                    if (!r.lat || !r.lon) return;
+                    const lat = parseFloat(r.lat);
+                    const lon = parseFloat(r.lon);
+                    if (isNaN(lat) || isNaN(lon)) return;
+
+                    const isMilitary = !!r.isMilitary;
+                    const preset = isMilitary ? 'islands#redDotIcon' : 'islands#blueDotIcon';
+
+                    const placemark = new ymaps.Placemark([lat, lon], {
+                        balloonContent: buildBalloon(r, lat, lon),
+                        hintContent: r.fio || '',
+                        fio: (r.fio || ''),
+                        cemetery: (r.cemetery || ''),
+                        isMilitary: isMilitary,
+                        searchStr: (r.searchStr || '').toLowerCase()
+                    }, {
+                        preset: preset
+                    });
+
+                    markersCollection.add(placemark);
+                });
+
+                applyFilters();
+            };
+        }
+
+        function buildBalloon(r, lat, lon) {
+            const dob = formatDate(r.dob);
+            const dod = formatDate(r.dod);
+            const cem = r.cemetery || 'Не указано';
+            const mil = r.isMilitary ? '<div style="margin-top:4px;color:#dc2626;font-weight:bold;">⚔️ Воинское захоронение</div>' : '';
+            return `
+                <div style="font-size:14px;">
+                    <div style="font-weight:bold; font-size:15px; margin-bottom:4px;">${escapeHtml(r.fio || '')}</div>
+                    <div>📅 ${dob} — ${dod}</div>
+                    <div>⛪ ${escapeHtml(cem)}</div>
+                    <div>📍 ${lat.toFixed(6)}, ${lon.toFixed(6)}</div>
+                    ${mil}
+                </div>
+            `;
+        }
+
+        function applyFilters() {
+            if (!markersCollection) return;
+            const text = document.getElementById('search-filter').value.toLowerCase();
+            const cem = document.getElementById('cemetery-filter').value;
+
+            let total = 0;
+            let military = 0;
+
+            markersCollection.each(pm => {
+                const props = pm.properties;
+                const searchStr = (props.get('searchStr') || '').toString();
+                const cemetery = props.get('cemetery') || '';
+                const isMilitary = !!props.get('isMilitary');
+
+                const matches = (!text || searchStr.includes(text)) && (!cem || cemetery === cem);
+                pm.options.set('visible', matches);
+
+                if (matches) {
+                    total++;
+                    if (isMilitary) military++;
+                }
+            });
+
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('military-count').textContent = military;
+        }
+
+        function showOnlyMilitary() {
+            if (!markersCollection) return;
+            document.getElementById('search-filter').value = '';
+            document.getElementById('cemetery-filter').value = '';
+
+            let total = 0;
+            let military = 0;
+
+            markersCollection.each(pm => {
+                const isMilitary = !!pm.properties.get('isMilitary');
+                const visible = isMilitary;
+                pm.options.set('visible', visible);
+                if (visible) {
+                    total++;
+                    military++;
+                }
+            });
+
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('military-count').textContent = military;
+        }
+
+        function resetFilters() {
+            if (!markersCollection) return;
+            document.getElementById('search-filter').value = '';
+            document.getElementById('cemetery-filter').value = '';
+
+            let total = 0;
+            let military = 0;
+
+            markersCollection.each(pm => {
+                pm.options.set('visible', true);
+                total++;
+                if (pm.properties.get('isMilitary')) military++;
+            });
+
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('military-count').textContent = military;
+        }
+
+        function toggleLegend() {
+            const box = document.getElementById('legend-box');
+            const txt = document.getElementById('legend-toggle-text');
+            const collapsed = box.classList.toggle('legend-collapsed');
+            txt.textContent = collapsed ? '⯈ Открыть' : '⯆ Скрыть';
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '—';
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return dateStr;
+            const [y, m, d] = parts;
+            return `${d}.${m}.${y}`;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+
+        // Инициализация: сначала IndexedDB, потом Яндекс.Карта
+        window.addEventListener('load', function() {
+            initDB().then(() => {
+                if (window.ymaps) {
+                    ymaps.ready(initMap);
+                } else {
+                    alert('Не удалось загрузить API Яндекс.Карт. Проверьте интернет и API-ключ.');
+                }
+            }).catch(err => {
+                console.error(err);
+                alert('Не удалось открыть базу данных CemeteryDB. Сначала создайте записи в приложении "Реестр захоронений".');
+            });
+        });
+    </script>
+</body>
+</html>
