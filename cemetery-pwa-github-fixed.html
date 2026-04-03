@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Цифровизация Захоронений (PWA + GitHub)</title>
+    <meta name="theme-color" content="#2563eb">
+    <link rel="manifest" href="manifest.webmanifest">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --danger: #dc2626;
+            --success: #16a34a;
+            --bg: #f3f4f6;
+            --card: #ffffff;
+            --text: #1f2937;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 15px;
+            padding-bottom: 90px;
+        }
+        h1 { font-size: 1.25rem; text-align: center; margin-bottom: 20px; }
+        .card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        label { display: block; margin-bottom: 5px; font-size: 0.9rem; font-weight: 500; }
+        input, select {
+            width: 100%; padding: 12px; margin-bottom: 15px;
+            border: 1px solid #d1d5db; border-radius: 8px;
+            font-size: 16px; background: #fff;
+        }
+        .row { display: flex; gap: 10px; }
+        .row > div { flex: 1; }
+        .row input { margin-bottom: 0; }
+        .date-inputs { display: flex; gap: 8px; margin-bottom: 15px; }
+        .date-inputs input {
+            flex: 1; margin-bottom: 0; text-align: center; padding: 12px 5px;
+        }
+        .date-inputs input::-webkit-outer-spin-button,
+        .date-inputs input::-webkit-inner-spin-button {
+            -webkit-appearance: none; margin: 0;
+        }
+        .date-inputs input[type=number] { -moz-appearance: textfield; }
+        button {
+            width: 100%; padding: 14px; border: none; border-radius: 8px;
+            font-size: 1rem; font-weight: 600; cursor: pointer;
+            transition: opacity 0.2s; margin-bottom: 10px;
+        }
+        button:active { opacity: 0.8; }
+        .btn-gps { background-color: #374151; color: white; margin-bottom: 8px;
+                   display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-save { background-color: var(--primary); color: white; }
+        .btn-update { background-color: var(--success); color: white; display: none; }
+        .btn-cancel { background-color: #9ca3af; color: white; display: none; }
+        .btn-export { background-color: #059669; color: white; margin-top: 10px; }
+        .btn-github { background-color: #111827; color: white; margin-top: 5px; }
+        #gps-status {
+            font-size: 0.85rem; color: #6b7280; margin-bottom: 10px;
+            text-align: center; line-height: 1.4; min-height: 20px;
+        }
+        .search-box {
+            position: sticky; top: 0; background: var(--bg);
+            padding-top: 10px; padding-bottom: 10px; z-index: 10;
+        }
+        #search {
+            padding-left: 35px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: 10px center; background-size: 20px;
+        }
+        .record-item {
+            background: var(--card); padding: 15px; border-radius: 8px;
+            margin-bottom: 10px; border-left: 4px solid var(--primary);
+        }
+        .record-title { font-weight: bold; font-size: 1.1rem; margin-bottom: 5px; }
+        .record-dates { color: #4b5563; font-size: 0.9rem; }
+        .record-info { color: #6b7280; font-size: 0.85rem; margin-top: 4px; }
+        .record-coords { color: #6b7280; font-size: 0.8rem; margin-top: 5px; font-family: monospace; }
+        .actions { margin-top: 10px; display: flex; gap: 10px; justify-content: flex-end; }
+        .btn-sm { width: auto; padding: 8px 16px; font-size: 0.85rem; margin-bottom: 0; }
+        .btn-edit { background-color: #eab308; color: black; }
+        .btn-delete { background-color: var(--danger); color: white; }
+        #toast {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #333; color: white; padding: 10px 20px;
+            border-radius: 20px; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none; z-index: 100;
+        }
+        .military-badge { color: #b91c1c; font-weight: bold; display: inline-flex; align-items: center; gap: 4px; }
+        .gps-manual { display: flex; gap: 10px; margin-bottom: 15px; }
+        .gps-manual input { flex: 1; margin-bottom: 0; }
+        .status-good { color: var(--success); }
+        .status-wait { color: orange; }
+        .status-error { color: var(--danger); }
+        #coords-raw { font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>Цифровизация Захоронений (PWA + GitHub)</h1>
+
+    <div class="card">
+        <input type="hidden" id="record-id">
+
+        <label>Кладбище</label>
+        <select id="cemetery">
+            <option value="">-- Выберите кладбище --</option>
+            <option value="Нагорное">Нагорное</option>
+            <option value="Шубино">Шубино</option>
+            <option value="Красная горка">Красная горка</option>
+            <option value="п. ж/д ст. Минка">п. ж/д ст. Минка</option>
+            <option value="п. Вязовая">п. Вязовая</option>
+            <option value="с. Тюбеляс">с. Тюбеляс</option>
+            <option value="с. Минка">с. Минка</option>
+            <option value="д. Вергаза">д. Вергаза</option>
+            <option value="д. Верхняя Лука">д. Верхняя Лука</option>
+        </select>
+
+        <label>ФИО Усопшего</label>
+        <input type="text" id="fio" placeholder="Иванов Иван Иванович">
+
+        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 15px; font-weight: 400; cursor: pointer;">
+            <input type="checkbox" id="military-grave" style="width: 20px; height: 20px; margin: 0;">
+            <span>⚔️ Воинское захоронение</span>
+        </label>
+
+        <div class="row">
+            <div>
+                <label>Дата рождения</label>
+                <div class="date-inputs">
+                    <input type="number" id="dob-day" placeholder="ДД" min="1" max="31" oninput="limitLen(this,2,'dob-month')">
+                    <input type="number" id="dob-month" placeholder="ММ" min="1" max="12" oninput="limitLen(this,2,'dob-year')">
+                    <input type="number" id="dob-year" placeholder="ГГГГ" min="1900" max="2100" oninput="limitLen(this,4,'dod-day')">
+                </div>
+            </div>
+            <div>
+                <label>Дата смерти</label>
+                <div class="date-inputs">
+                    <input type="number" id="dod-day" placeholder="ДД" min="1" max="31" oninput="limitLen(this,2,'dod-month')">
+                    <input type="number" id="dod-month" placeholder="ММ" min="1" max="12" oninput="limitLen(this,2,'dod-year')">
+                    <input type="number" id="dod-year" placeholder="ГГГГ" min="1900" max="2100" oninput="limitLen(this,4,'coords-raw')">
+                </div>
+            </div>
+        </div>
+
+        <div id="gps-status" class="status-wait">
+            Координаты не определены. Можно:
+            • попробовать получить через браузер
+            • или вставить строку из GPS Test ниже.
+        </div>
+
+        <button class="btn-gps" onclick="getGPS()">📍 Получить координаты (если браузер разрешит)</button>
+
+        <input type="text" id="coords-raw" placeholder="Вставьте сюда строку с координатами из GPS Test и нажмите кнопку ниже">
+
+        <button class="btn-gps" onclick="parseClipboardCoords()">📋 Получить координаты из буфера (после вставки)</button>
+
+        <div class="gps-manual">
+            <input type="number" id="lat-manual" placeholder="Широта (55.123456)" step="0.000001">
+            <input type="number" id="lon-manual" placeholder="Долгота (60.123456)" step="0.000001">
+        </div>
+
+        <input type="hidden" id="lat">
+        <input type="hidden" id="lon">
+
+        <button class="btn-save" id="btn-save" onclick="saveRecord()">Сохранить запись</button>
+        <div class="row">
+            <button class="btn-update" id="btn-update" onclick="updateRecord()">Обновить</button>
+            <button class="btn-cancel" id="btn-cancel" onclick="cancelEdit()">Отмена</button>
+        </div>
+    </div>
+
+    <div class="search-box">
+        <input type="text" id="search" placeholder="🔍 Поиск по ФИО или году..." oninput="searchRecords()">
+    </div>
+
+    <div id="results-list"></div>
+
+    <button class="btn-export" onclick="exportToExcel()">💾 Скачать базу в Excel (CSV)</button>
+    <button class="btn-github" onclick="exportToGitHub()">⬆️ Отправить базу в GitHub (CSV)</button>
+
+    <div id="toast">Сохранено!</div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(err => {
+                    console.error('SW registration failed', err);
+                });
+            });
+        }
+
+        let db = null;
+        const DB_NAME = 'CemeteryDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'graves';
+
+        function limitLen(input, maxLen, nextId) {
+            let v = input.value.toString();
+            if (v.length > maxLen) {
+                v = v.slice(0, maxLen);
+                input.value = v;
+            }
+            if (v.length >= maxLen && nextId) {
+                const next = document.getElementById(nextId);
+                if (next) {
+                    next.focus();
+                    if (next.select) next.select();
+                }
+            }
+        }
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onupgradeneeded = (e) => {
+                    const tempDb = e.target.result;
+                    if (!tempDb.objectStoreNames.contains(STORE_NAME)) {
+                        const store = tempDb.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                        store.createIndex('fio', 'fio', { unique: false });
+                        store.createIndex('search_str', 'search_str', { unique: false });
+                    }
+                };
+
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    resolve(db);
+                };
+
+                request.onerror = (e) => {
+                    alert('Ошибка базы данных. Проверьте браузер.');
+                    reject(e);
+                };
+            });
+        }
+
+        function getGPS() {
+            const status = document.getElementById('gps-status');
+
+            if (!navigator.geolocation) {
+                status.textContent = 'GPS не поддерживается браузером. Откройте GPS Test и вставьте координаты ниже.';
+                status.className = 'status-error';
+                return;
+            }
+
+            status.textContent = 'Определение местоположения...';
+            status.className = 'status-wait';
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    const acc = position.coords.accuracy;
+
+                    setCoords(lat.toFixed(6), lon.toFixed(6));
+
+                    status.innerHTML = `✅ Широта: ${lat.toFixed(6)}; Долгота: ${lon.toFixed(6)} (точность ±${Math.round(acc)}м)`;
+                    status.className = 'status-good';
+                },
+                (error) => {
+                    let msg = '';
+                    switch (error.code) {
+                        case error.PERMISSION_DENIED:
+                            msg = 'Доступ к геопозиции запрещён. Используйте GPS Test: скопируйте координаты и вставьте их ниже.';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            msg = 'Информация о местоположении недоступна. Попробуйте выйти на открытую местность или используйте GPS Test.';
+                            break;
+                        case error.TIMEOUT:
+                            msg = 'Время ожидания истекло. Попробуйте ещё раз на улице или используйте GPS Test.';
+                            break;
+                        default:
+                            msg = 'Неизвестная ошибка геолокации. Используйте GPS Test и вставьте координаты вручную.';
+                    }
+                    status.textContent = msg;
+                    status.className = 'status-error';
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
+        }
+
+        function setCoords(lat, lon) {
+            document.getElementById('lat').value = lat;
+            document.getElementById('lon').value = lon;
+            const lm = document.getElementById('lat-manual');
+            const ln = document.getElementById('lon-manual');
+            if (lm) lm.value = lat;
+            if (ln) ln.value = lon;
+        }
+
+        function parseClipboardCoords() {
+            const raw = document.getElementById('coords-raw').value.trim();
+            if (!raw) {
+                alert('Сначала вставьте строку с координатами из GPS Test в поле выше.');
+                return;
+            }
+
+            const nums = raw.match(/-?\d+(?:\.\d+)?/g);
+            if (!nums || nums.length < 2) {
+                alert('Не удалось распознать широту и долготу. Пример: 54.936763°N,58.164880°E');
+                return;
+            }
+
+            let lat = parseFloat(nums[0]);
+            let lon = parseFloat(nums[1]);
+
+            if (/S/i.test(raw) && lat > 0) lat = -lat;
+            if (/W/i.test(raw) && lon > 0) lon = -lon;
+
+            const latStr = lat.toFixed(6);
+            const lonStr = lon.toFixed(6);
+            setCoords(latStr, lonStr);
+
+            const status = document.getElementById('gps-status');
+            status.textContent = `✅ Координаты из GPS Test: ${latStr}, ${lonStr}`;
+            status.className = 'status-good';
+        }
+
+        document.getElementById('lat-manual').addEventListener('input', (e) => {
+            document.getElementById('lat').value = e.target.value;
+        });
+
+        document.getElementById('lon-manual').addEventListener('input', (e) => {
+            document.getElementById('lon').value = e.target.value;
+        });
+
+        function formatDateFromInputs(day, month, year) {
+            if (!day || !month || !year) return '';
+            const d = String(day).padStart(2, '0');
+            const m = String(month).padStart(2, '0');
+            return `${year}-${m}-${d}`;
+        }
+
+        function parseDate(dateStr) {
+            if (!dateStr) return { day: '', month: '', year: '' };
+            const [y, m, d] = dateStr.split('-');
+            return { day: d ? parseInt(d) : '', month: m ? parseInt(m) : '', year: y ? parseInt(y) : '' };
+        }
+
+        function saveRecord() {
+            const fio = document.getElementById('fio').value.trim();
+            const dob = formatDateFromInputs(
+                document.getElementById('dob-day').value,
+                document.getElementById('dob-month').value,
+                document.getElementById('dob-year').value
+            );
+            const dod = formatDateFromInputs(
+                document.getElementById('dod-day').value,
+                document.getElementById('dod-month').value,
+                document.getElementById('dod-year').value
+            );
+            const lat = document.getElementById('lat').value;
+            const lon = document.getElementById('lon').value;
+
+            if (!fio) {
+                alert('Введите ФИО!');
+                return;
+            }
+
+            if (!dob || !dod) {
+                alert('Заполните обе даты!');
+                return;
+            }
+
+            if (!db) {
+                alert('База данных не загружена');
+                return;
+            }
+
+            const cemetery = document.getElementById('cemetery').value;
+            const isMilitary = document.getElementById('military-grave').checked;
+            const searchStr = (fio + ' ' + dob + ' ' + dod + ' ' + cemetery + (isMilitary ? ' воинское' : '')).toLowerCase();
+            const record = { fio, dob, dod, lat, lon, cemetery, isMilitary, searchStr, timestamp: new Date().toISOString() };
+
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.add(record);
+
+            request.onsuccess = () => {
+                showToast('✅ Запись сохранена!');
+                saveCemeteryPreference(cemetery);
+                clearForm();
+                document.getElementById('search').value = '';
+                document.getElementById('results-list').innerHTML = '';
+            };
+
+            request.onerror = () => {
+                alert('Ошибка при сохранении');
+            };
+        }
+
+        function searchRecords() {
+            const query = document.getElementById('search').value.toLowerCase().trim();
+            const list = document.getElementById('results-list');
+
+            if (query.length < 2) {
+                list.innerHTML = '';
+                return;
+            }
+
+            if (!db) return;
+
+            list.innerHTML = '';
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.openCursor();
+
+            let count = 0;
+            const MAX_RESULTS = 100;
+
+            request.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor && count < MAX_RESULTS) {
+                    const data = cursor.value;
+                    if ((data.searchStr || '').includes(query)) {
+                        renderCard(data, list);
+                        count++;
+                    }
+                    cursor.continue();
+                } else if (count === 0 && query.length >= 2) {
+                    list.innerHTML = '<div style="text-align:center; color:#888; padding:20px;">Ничего не найдено</div>';
+                }
+            };
+
+            request.onerror = () => {
+                list.innerHTML = '<div style="color:red;">Ошибка поиска</div>';
+            };
+        }
+
+        function renderCard(data, container) {
+            const div = document.createElement('div');
+            div.className = 'record-item';
+
+            const lat = data.lat ? data.lat.substring(0, 10) : '—';
+            const lon = data.lon ? data.lon.substring(0, 10) : '—';
+            const military = data.isMilitary ? '<span class="military-badge">⚔️ Воинское</span>' : '';
+
+            div.innerHTML = `
+                <div class="record-title">${escapeHtml(data.fio)}</div>
+                <div class="record-dates">${formatDate(data.dob)} — ${formatDate(data.dod)}</div>
+                <div class="record-info">⛪ ${data.cemetery || 'Не указано'} ${military}</div>
+                <div class="record-coords">GPS: ${lat}, ${lon}</div>
+                <div class="actions">
+                    <button class="btn-sm btn-edit" onclick="editRecord(${data.id})">Изменить</button>
+                    <button class="btn-sm btn-delete" onclick="deleteRecord(${data.id})">Удалить</button>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function deleteRecord(id) {
+            if (!confirm('Удалить эту запись?')) return;
+            if (!db) return;
+
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            tx.objectStore(STORE_NAME).delete(id);
+
+            tx.oncomplete = () => {
+                showToast('🗑️ Запись удалена');
+                searchRecords();
+            };
+
+            tx.onerror = () => {
+                alert('Ошибка при удалении');
+            };
+        }
+
+        function editRecord(id) {
+            if (!db) return;
+
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const request = tx.objectStore(STORE_NAME).get(id);
+
+            request.onsuccess = () => {
+                const data = request.result;
+                if (!data) return;
+
+                document.getElementById('record-id').value = data.id;
+                document.getElementById('cemetery').value = data.cemetery || '';
+                document.getElementById('fio').value = data.fio;
+                document.getElementById('military-grave').checked = data.isMilitary || false;
+
+                const dobParts = parseDate(data.dob);
+                document.getElementById('dob-day').value = dobParts.day;
+                document.getElementById('dob-month').value = dobParts.month;
+                document.getElementById('dob-year').value = dobParts.year;
+
+                const dodParts = parseDate(data.dod);
+                document.getElementById('dod-day').value = dodParts.day;
+                document.getElementById('dod-month').value = dodParts.month;
+                document.getElementById('dod-year').value = dodParts.year;
+
+                setCoords(data.lat || '', data.lon || '');
+
+                const status = document.getElementById('gps-status');
+                if (data.lat && data.lon) {
+                    status.innerHTML = `💾 Координаты из записи: ${data.lat}, ${data.lon}`;
+                    status.className = 'status-good';
+                } else {
+                    status.textContent = 'Координаты не определены. Можно получить через браузер или вставить строку из GPS Test.';
+                    status.className = 'status-wait';
+                }
+
+                toggleEditMode(true);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+        }
+
+        function updateRecord() {
+            const id = Number(document.getElementById('record-id').value);
+            const fio = document.getElementById('fio').value.trim();
+            const dob = formatDateFromInputs(
+                document.getElementById('dob-day').value,
+                document.getElementById('dob-month').value,
+                document.getElementById('dob-year').value
+            );
+            const dod = formatDateFromInputs(
+                document.getElementById('dod-day').value,
+                document.getElementById('dod-month').value,
+                document.getElementById('dod-year').value
+            );
+            const cemetery = document.getElementById('cemetery').value;
+            const isMilitary = document.getElementById('military-grave').checked;
+            const lat = document.getElementById('lat').value;
+            const lon = document.getElementById('lon').value;
+
+            if (!fio || !dob || !dod || !db) return;
+
+            const searchStr = (fio + ' ' + dob + ' ' + dod + ' ' + cemetery + (isMilitary ? ' воинское' : '')).toLowerCase();
+            const record = { id, fio, dob, dod, lat, lon, cemetery, isMilitary, searchStr, timestamp: new Date().toISOString() };
+
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const request = tx.objectStore(STORE_NAME).put(record);
+
+            request.onsuccess = () => {
+                showToast('✏️ Запись обновлена!');
+                saveCemeteryPreference(cemetery);
+                clearForm();
+                toggleEditMode(false);
+                searchRecords();
+            };
+        }
+
+        function cancelEdit() {
+            clearForm();
+            toggleEditMode(false);
+        }
+
+        function toggleEditMode(isEdit) {
+            document.getElementById('btn-save').style.display = isEdit ? 'none' : 'block';
+            document.getElementById('btn-update').style.display = isEdit ? 'block' : 'none';
+            document.getElementById('btn-cancel').style.display = isEdit ? 'block' : 'none';
+        }
+
+        function exportToExcel() {
+            if (!db) return;
+
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const request = tx.objectStore(STORE_NAME).getAll();
+
+            request.onsuccess = () => {
+                const records = request.result;
+                if (records.length === 0) {
+                    alert('База пуста!');
+                    return;
+                }
+
+                let csv = '﻿ID;ФИО;Дата рождения;Дата смерти;Кладбище;Воинское;Широта;Долгота
+';
+
+                records.forEach(r => {
+                    const fio = (r.fio || '').replace(/"/g, '""');
+                    const military = r.isMilitary ? 'Да' : 'Нет';
+                    csv += `${r.id};"${fio}";${r.dob};${r.dod};"${(r.cemetery || '').replace(/"/g, '""')}";${military};${r.lat || ''};${r.lon || ''}
+`;
+                });
+
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `cemetery_${new Date().toISOString().slice(0,10)}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                showToast('💾 Файл скачан!');
+            };
+
+            request.onerror = () => {
+                alert('Ошибка экспорта');
+            };
+        }
+
+        async function exportToGitHub() {
+            if (!db) return;
+
+            let owner = localStorage.getItem('gh_owner') || '';
+            let repo = localStorage.getItem('gh_repo') || '';
+            let path = localStorage.getItem('gh_path') || 'data/cemetery.csv';
+
+            if (!owner) {
+                owner = prompt('GitHub owner (логин):');
+                if (!owner) return;
+                localStorage.setItem('gh_owner', owner);
+            }
+
+            if (!repo) {
+                repo = prompt('Repository (имя репозитория):');
+                if (!repo) return;
+                localStorage.setItem('gh_repo', repo);
+            }
+
+            if (!path) {
+                const p = prompt('Путь к файлу в репозитории (например, data/cemetery.csv):', 'data/cemetery.csv');
+                if (!p) return;
+                path = p;
+                localStorage.setItem('gh_path', path);
+            }
+
+            const token = prompt('Личный токен GitHub (PAT) с правом repo:');
+            if (!token) return;
+
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const request = tx.objectStore(STORE_NAME).getAll();
+
+            request.onsuccess = async () => {
+                const records = request.result || [];
+                if (records.length === 0) {
+                    alert('База пуста! Нечего отправлять.');
+                    return;
+                }
+
+                let csv = 'ID;ФИО;Дата рождения;Дата смерти;Кладбище;Воинское;Широта;Долгота
+';
+                records.forEach(r => {
+                    const fio = (r.fio || '').replace(/"/g, '""');
+                    const military = r.isMilitary ? 'Да' : 'Нет';
+                    csv += `${r.id};"${fio}";${r.dob};${r.dod};"${(r.cemetery || '').replace(/"/g, '""')}";${military};${r.lat || ''};${r.lon || ''}
+`;
+                });
+
+                const contentBase64 = btoa(unescape(encodeURIComponent(csv)));
+                const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+
+                try {
+                    let sha = null;
+                    const getResp = await fetch(apiUrl, {
+                        headers: {
+                            'Accept': 'application/vnd.github.v3+json',
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    if (getResp.ok) {
+                        const fileData = await getResp.json();
+                        sha = fileData.sha;
+                    }
+
+                    const body = {
+                        message: 'Обновление реестра захоронений из PWA',
+                        content: contentBase64,
+                        committer: {
+                            name: owner,
+                            email: 'no-reply@example.com'
+                        }
+                    };
+                    if (sha) body.sha = sha;
+
+                    const putResp = await fetch(apiUrl, {
+                        method: 'PUT',
+                        headers: {
+                            'Accept': 'application/vnd.github.v3+json',
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(body)
+                    });
+
+                    if (!putResp.ok) {
+                        const errText = await putResp.text();
+                        console.error('GitHub error', errText);
+                        alert('Ошибка GitHub API. Подробнее в консоли.');
+                        return;
+                    }
+
+                    showToast('⬆️ База отправлена в GitHub!');
+                } catch (e) {
+                    console.error('GitHub upload failed', e);
+                    alert('Не удалось отправить в GitHub. Проверьте токен и интернет.');
+                }
+            };
+
+            request.onerror = () => {
+                alert('Ошибка чтения базы');
+            };
+        }
+
+        function clearForm() {
+            document.getElementById('fio').value = '';
+            document.getElementById('dob-day').value = '';
+            document.getElementById('dob-month').value = '';
+            document.getElementById('dob-year').value = '';
+            document.getElementById('dod-day').value = '';
+            document.getElementById('dod-month').value = '';
+            document.getElementById('dod-year').value = '';
+            document.getElementById('record-id').value = '';
+            setCoords('', '');
+            document.getElementById('coords-raw').value = '';
+            document.getElementById('military-grave').checked = false;
+            document.getElementById('gps-status').textContent = 'Координаты не определены. Можно получить через браузер или вставить строку из GPS Test.';
+            document.getElementById('gps-status').className = 'status-wait';
+            loadCemeteryPreference();
+        }
+
+        function saveCemeteryPreference(cemetery) {
+            localStorage.setItem('lastCemetery', cemetery);
+        }
+
+        function loadCemeteryPreference() {
+            const lastCemetery = localStorage.getItem('lastCemetery');
+            if (lastCemetery) {
+                document.getElementById('cemetery').value = lastCemetery;
+            }
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.opacity = '1';
+            setTimeout(() => t.style.opacity = '0', 3000);
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '—';
+            const [y, m, d] = dateStr.split('-');
+            return `${d}.${m}.${y}`;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+
+        initDB().then(() => {
+            loadCemeteryPreference();
+        }).catch(err => {
+            console.error('Не удалось инициализировать БД:', err);
+            alert('Ошибка: браузер не поддерживает IndexedDB');
+        });
+    </script>
+</body>
+</html>
